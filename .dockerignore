@@ -1,16 +1,41 @@
-venv/
-__pycache__/
-*.pyc
+# Git
 .git/
-.claude/
-*.bak
-*.log
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+*.whl
+
+# Virtual environment
+venv/
+.venv/
+
+# User data & config
 data/
 settings.json
+*.local.json
+
+# Backups & logs
+*.bak
+*.log
+server.log
+
+# IDE / OS
+.claude/
 .idea/
 .vscode/
-.gitignore
-.gitattributes
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Project-specific (not needed at runtime)
+docker-compose.yml
+Dockerfile
 README.md
-migrate.py
-*.md

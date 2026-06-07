@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>小说写作工具</title>
-<link rel="stylesheet" href="/css/style.css">
+<link rel="stylesheet" href="/css/style.css?v=3">
 </head>
 <body>
 
@@ -35,6 +35,10 @@
 
   <!-- ─── 侧边栏面板 ─── -->
   <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <span class="sidebar-header-title">导航</span>
+      <button class="sidebar-collapse-btn" id="sidebarCollapseBtn" title="收起侧边栏">◀</button>
+    </div>
     <!-- 小说 + 章节面板 -->
     <div class="sidebar-panel active" data-panel="novels">
       <section class="panel-section">
@@ -64,6 +68,7 @@
         <div class="search-results" id="searchResults"></div>
       </div>
     </div>
+    <div class="sidebar-resize-handle" id="sidebarResizeHandle"></div>
   </aside>
 
   <!-- ─── 主编辑区 ─── -->
@@ -140,6 +145,7 @@
 
     <!-- ─── AI 聊天停靠区（右侧面板） ─── -->
     <div class="chat-dock" id="chatDock">
+      <div class="chat-resize-handle" id="chatResizeHandle"></div>
       <div class="chat-header">
         <span>✨ AI 写作助手</span>
         <span class="chat-model" id="chatModel"></span>
@@ -321,7 +327,8 @@
     </div>
   </div>
 </div>
-<script src="/js/api.js?v=16"></script>
-<script src="/js/app.js?v=16"></script>
+<script src="/js/api.js?v=21"></script>
+<script src="/js/utils.js?v=21"></script>
+<script src="/js/app.js?v=21"></script>
 </body>
 </html>

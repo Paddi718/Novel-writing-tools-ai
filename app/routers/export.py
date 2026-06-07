@@ -1,13 +1,17 @@
-"""小说导出/下载路由 — 支持 TXT / Markdown 格式"""
+"""小说导出/下载路由 — 支持 TXT / Markdown 格式
+
+注意：路由职责限定为 HTTP 响应组装，导出业务逻辑委派给 services/export.py
+"""
 
 import io
 import zipfile
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
 
-from app.storage import load_novel
+from app.services import export as export_service
 
 
 class ExportSelection(BaseModel):
@@ -18,26 +22,13 @@ class ExportSelection(BaseModel):
 router = APIRouter(prefix="/api/novels/{name}", tags=["导出"])
 
 
-def _filename(s: str) -> str:
-    """过滤文件名中的非法字符"""
-    return "".join(c if c.isalnum() or c in (" ", "-", "_", ".") else "_" for c in s)
-
-
-def _chapter_content(meta_title: str, ch, fmt: str = 'txt') -> str:
-    """根据格式生成章节内容"""
-    if fmt == 'md':
-        return f"# 第{ch['order'] + 1}章  {ch['title']}\n\n{ch.get('content', '')}"
-    return f"第{ch['order'] + 1}章  {ch['title']}\n\n{ch.get('content', '')}"
-
-
-def _chapter_filename(ch, fmt: str = 'txt') -> str:
-    """生成章节文件名（含扩展名）"""
-    ext = 'md' if fmt == 'md' else 'txt'
-    return _filename(f"第{ch['order'] + 1:03d}章_{ch['title']}.{ext}")
-
-
-def _media_type(fmt: str = 'txt') -> str:
-    return 'text/markdown; charset=utf-8' if fmt == 'md' else 'text/plain; charset=utf-8'
+def _content_disposition(fn: str) -> str:
+    """生成兼容中文的 Content-Disposition（RFC 5987）"""
+    ascii_name = fn.encode("ascii", errors="replace").decode("ascii")
+    if ascii_name == fn:
+        return f'attachment; filename="{fn}"'
+    # 包含非 ASCII 字符 → 用 filename* 编码
+    return f"attachment; filename*=UTF-8''{quote(fn)}"
 
 
 # ──────────────────────────────────────────────
@@ -47,12 +38,11 @@ def _media_type(fmt: str = 'txt') -> str:
 @router.get("/export/zip")
 def export_novel_zip(name: str, format: str = Query('txt', pattern='^(txt|md)$')):
     """导出全部章节为 ZIP（每章一个独立文件）"""
-    data = load_novel(name)
-    if data is None:
+    package = export_service.get_export_package(name, fmt=format)
+    if package is None:
         raise HTTPException(404, "小说不存在")
 
-    meta = data["novel"]
-    chapters = data.get("chapters", [])
+    meta, chapters, fmt = package
     buf = io.BytesIO()
 
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -66,16 +56,16 @@ def export_novel_zip(name: str, format: str = Query('txt', pattern='^(txt|md)$')
         zf.writestr("00_小说信息.txt", "\n".join(info_lines))
 
         for ch in chapters:
-            content = _chapter_content(meta['title'], ch, format)
-            fn = _chapter_filename(ch, format)
+            content = export_service.chapter_content(meta['title'], ch, fmt)
+            fn = export_service.chapter_filename(ch, fmt)
             zf.writestr(fn, content)
 
     buf.seek(0)
-    fn = _filename(f"{name}.zip")
+    fn = export_service.sanitize_filename(f"{name}.zip")
     return StreamingResponse(
         buf,
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{fn}"'},
+        headers={"Content-Disposition": _content_disposition(fn)},
     )
 
 
@@ -86,30 +76,25 @@ def export_novel_zip(name: str, format: str = Query('txt', pattern='^(txt|md)$')
 @router.post("/export/zip-selected")
 def export_selected_zip(name: str, selection: ExportSelection):
     """导出选中的章节为 ZIP"""
-    data = load_novel(name)
-    if data is None:
-        raise HTTPException(404, "小说不存在")
-
     fmt = selection.format
-    chapters = data.get("chapters", [])
-    selected = [ch for ch in chapters if ch["id"] in selection.chapter_ids]
-    if not selected:
-        raise HTTPException(400, "未选择任何章节")
+    package = export_service.get_export_package(name, selection.chapter_ids, fmt)
+    if package is None:
+        raise HTTPException(404, "小说不存在或未选择任何章节")
 
-    meta = data["novel"]
+    meta, chapters, fmt = package
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for ch in selected:
-            content = _chapter_content(meta['title'], ch, fmt)
-            fn = _chapter_filename(ch, fmt)
+        for ch in chapters:
+            content = export_service.chapter_content(meta['title'], ch, fmt)
+            fn = export_service.chapter_filename(ch, fmt)
             zf.writestr(fn, content)
 
     buf.seek(0)
-    fn = _filename(f"{name}_selected.zip")
+    fn = export_service.sanitize_filename(f"{name}_selected.zip")
     return StreamingResponse(
         buf,
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{fn}"'},
+        headers={"Content-Disposition": _content_disposition(fn)},
     )
 
 
@@ -120,23 +105,20 @@ def export_selected_zip(name: str, selection: ExportSelection):
 @router.get("/chapters/{chapter_id}/download")
 def download_chapter(name: str, chapter_id: str, format: str = Query('txt', pattern='^(txt|md)$')):
     """下载单个章节"""
-    data = load_novel(name)
-    if data is None:
+    package = export_service.get_export_package(name, fmt=format)
+    if package is None:
         raise HTTPException(404, "小说不存在")
 
-    chapter = next(
-        (ch for ch in data.get("chapters", []) if ch["id"] == chapter_id),
-        None,
-    )
+    meta, chapters, fmt = package
+    chapter = next((ch for ch in chapters if ch["id"] == chapter_id), None)
     if chapter is None:
         raise HTTPException(404, "章节不存在")
 
-    meta = data["novel"]
-    fmt = format
-    content = _chapter_content(meta['title'], chapter, fmt)
-    fn = _chapter_filename(chapter, fmt)
+    content = export_service.chapter_content(meta['title'], chapter, fmt)
+    fn = export_service.chapter_filename(chapter, fmt)
+    mt = export_service.media_type(fmt)
     return PlainTextResponse(
         content,
-        media_type=_media_type(fmt),
-        headers={"Content-Disposition": f'attachment; filename="{fn}"'},
+        media_type=mt,
+        headers={"Content-Disposition": _content_disposition(fn)},
     )

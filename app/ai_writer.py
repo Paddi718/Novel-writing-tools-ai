@@ -24,24 +24,24 @@ class AIWriter:
     # ------------------------------------------------------------------
     # 对外接口
     # ------------------------------------------------------------------
-    async def chat(self, system: str, message: str) -> AsyncGenerator[str, None]:
-        """通用聊天 — system=上下文指令, message=用户消息"""
-        async for chunk in self._stream(system, message):
+    async def chat(self, system: str, user_input: str) -> AsyncGenerator[str, None]:
+        """通用聊天 — system=系统提示, user_input=用户消息正文"""
+        async for chunk in self._stream(system, user_input):
             yield chunk
 
     # ------------------------------------------------------------------
     # 流式调用
     # ------------------------------------------------------------------
-    async def _stream(self, system: str, message: str) -> AsyncGenerator[str, None]:
+    async def _stream(self, system: str, user_input: str) -> AsyncGenerator[str, None]:
         try:
             if self.provider == "claude":
-                async for chunk in self._stream_claude(system, message):
+                async for chunk in self._stream_claude(system, user_input):
                     yield chunk
             elif self.provider == "openai":
-                async for chunk in self._stream_openai(system, message):
+                async for chunk in self._stream_openai(system, user_input):
                     yield chunk
             elif self.provider == "anthropic":
-                async for chunk in self._stream_anthropic(system, message):
+                async for chunk in self._stream_anthropic(system, user_input):
                     yield chunk
             else:
                 yield f"[错误] 不支持的 AI 提供商：{self.provider}"
@@ -54,7 +54,7 @@ class AIWriter:
     # Claude CLI
     # ------------------------------------------------------------------
     async def _stream_claude(
-        self, system: str, message: str
+        self, system: str, user_input: str
     ) -> AsyncGenerator[str, None]:
         cmd = self._find_claude()
         if not cmd:
@@ -69,7 +69,7 @@ class AIWriter:
         )
 
         # 拼合 prompt（Claude CLI 需要一次性发送）
-        prompt = f"{system}\n\n{message}\n\n"
+        prompt = f"{system}\n\n{user_input}\n\n"
         process.stdin.write(prompt.encode("utf-8"))
         await process.stdin.drain()
         process.stdin.close()
@@ -121,7 +121,7 @@ class AIWriter:
     # OpenAI 兼容 API
     # ------------------------------------------------------------------
     async def _stream_openai(
-        self, system: str, message: str
+        self, system: str, user_input: str
     ) -> AsyncGenerator[str, None]:
         import httpx
 
@@ -135,7 +135,7 @@ class AIWriter:
             "model": model,
             "messages": [
                 {"role": "system", "content": system},
-                {"role": "user", "content": message},
+                {"role": "user", "content": user_input},
             ],
             "stream": True,
             "max_tokens": self.max_tokens,
@@ -167,7 +167,7 @@ class AIWriter:
     # Anthropic API
     # ------------------------------------------------------------------
     async def _stream_anthropic(
-        self, system: str, message: str
+        self, system: str, user_input: str
     ) -> AsyncGenerator[str, None]:
         import httpx
 
@@ -182,7 +182,7 @@ class AIWriter:
             "system": system,
             "max_tokens": self.max_tokens,
             "temperature": self.temperature,
-            "messages": [{"role": "user", "content": message}],
+            "messages": [{"role": "user", "content": user_input}],
             "stream": True,
         }
         async with httpx.AsyncClient(timeout=120) as client:

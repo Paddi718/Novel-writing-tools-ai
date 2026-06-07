@@ -29,9 +29,6 @@ settings.json
 .DS_Store
 Thumbs.db
 
-# Docker
-.dockerignore
-
 # Migration (one-off scripts, not part of the app)
 migrate.py
 

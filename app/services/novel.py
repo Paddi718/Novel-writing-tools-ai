@@ -126,3 +126,40 @@ def update_novel(name: str, data: NovelCreate) -> dict | None:
 def delete_novel(name: str) -> bool:
     """删除小说"""
     return delete_novel_file(name)
+
+
+def search_novel(name: str, query: str,
+                 scope: str = "all", chapter_id: str = "") -> dict | None:
+    """搜索小说全文"""
+    data = load_novel(name)
+    if data is None:
+        return None
+    if not query.strip():
+        return {"results": []}
+
+    q = query.strip().lower()
+    chapters = data.get("chapters", [])
+    if scope == "chapter" and chapter_id:
+        chapters = [ch for ch in chapters if ch["id"] == chapter_id]
+
+    results = []
+    for ch in chapters:
+        content = ch.get("content", "")
+        if q not in content.lower():
+            continue
+        idx = content.lower().index(q)
+        start = max(0, idx - 30)
+        end = min(len(content), idx + len(q) + 60)
+        snippet = content[start:end]
+        if start > 0:
+            snippet = "…" + snippet
+        if end < len(content):
+            snippet = snippet + "…"
+        results.append({
+            "chapter_id": ch["id"],
+            "chapter_title": ch["title"],
+            "chapter_order": ch["order"],
+            "snippet": snippet,
+            "match_count": content.lower().count(q),
+        })
+    return {"results": results, "query": q}

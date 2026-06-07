@@ -38,11 +38,12 @@ async def ai_chat(name: str, chapter_id: str, data: AIChatRequest):
         settings["max_tokens"] = min(calculated, 128000)
 
     system = service.build_system_context(name, chapter_id, data)
+    user_message = service.build_user_message(data)
     ai = AIWriter(settings)
 
     async def event_stream():
         yield "event: start\ndata: {}\n\n"
-        async for chunk in ai.chat(system, data.message):
+        async for chunk in ai.chat(system, user_message):
             yield f"data: {json.dumps({'text': chunk}, ensure_ascii=False)}\n\n"
         yield "event: done\ndata: {}\n\n"
 

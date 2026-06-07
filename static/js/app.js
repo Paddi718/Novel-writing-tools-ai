@@ -5,6 +5,10 @@
   'use strict';
   console.log('[app.js] loaded');
 
+  // ── 从工具模块导入纯函数 ──
+  const { wordCount, escapeHtml, formatNum, debounce, highlightText,
+          extractSummary, renderMarkdown, cleanAIText } = APP.Utils;
+
   /* ================================================================
      状态
      ================================================================ */
@@ -51,23 +55,16 @@
       'btnEditNovel', 'editNovelOverlay', 'editNovelForm',
       'editNovelTitle', 'editNovelAuthor', 'editNovelDesc', 'btnCancelEditNovel',
       'summaryHeader', 'btnSummaryToggle', 'summaryResizeHandle',
+      'sidebar', 'sidebarResizeHandle', 'sidebarCollapseBtn', 'activityBar',
+      'chatResizeHandle',
     ];
     ids.forEach(id => { dom[id] = $(`#${id}`); });
     dom.apiKeyLabel = $('#apiKeyLabel');
   }
 
   /* ================================================================
-     工具
+     工具（依赖 DOM，故留在 app.js）
      ================================================================ */
-  function wordCount(text) {
-    let count = 0;
-    for (const ch of text) {
-      if (ch >= '一' && ch <= '鿿' || ch >= '　' && ch <= '〿') count++;
-      else if (/[a-zA-Z]/.test(ch)) count++;
-    }
-    return count;
-  }
-
   function setStatus(msg) { dom.statusText.textContent = msg; }
 
   function showToast(msg, type = 'info') {
@@ -78,38 +75,6 @@
     el.textContent = msg;
     container.appendChild(el);
     setTimeout(() => { if (el.parentNode) el.remove(); }, 3000);
-  }
-
-  function debounce(fn, ms) {
-    let timer;
-    return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), ms); };
-  }
-
-  function escapeHtml(str) {
-    if (!str) return '';
-    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  }
-
-  function formatNum(n) {
-    if (!n) return '0';
-    if (n >= 10000) return (n / 10000).toFixed(1) + 'w';
-    if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
-    return String(n);
-  }
-
-  /** 搜索结果高亮 */
-  function highlightText(text, query) {
-    if (!query) return escapeHtml(text);
-    const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const re = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-    return escaped.replace(re, '<em>$1</em>');
-  }
-
-  /** 从结构化概要中提取【概要】部分 */
-  function extractSummary(summary) {
-    if (!summary) return '';
-    const m = summary.match(/【概要】([\s\S]*?)(?=【|$)/);
-    return m ? m[1].trim() : summary.trim();
   }
 
   /* ================================================================
@@ -257,16 +222,21 @@
     } catch (e) { dom.chapterSection.style.display = 'none'; }
   }
 
+  /** 统一的章节列表项 HTML（renderChapterList / reverseSidebar 共用） */
+  function _chapterItemHTML(ch, isActive) {
+    return `<div class="chapter-item ${isActive ? 'active' : ''}"
+          data-id="${ch.id}" draggable="true">
+      <span class="ch-order">${ch.order + 1}</span>
+      <span class="ch-title">${escapeHtml(ch.title) || '（未命名）'}</span>
+      <button class="ch-summary-btn" data-id="${ch.id}" title="AI 概要">📋</button>
+      <span class="ch-wc">${formatNum(ch.word_count)}</span>
+      <button class="ch-del" data-id="${ch.id}" title="删除">&times;</button>
+    </div>`;
+  }
+
   function renderChapterList() {
     dom.chapterList.innerHTML = state.chapters.map(ch =>
-      `<div class="chapter-item ${ch.id === state.currentChapterId ? 'active' : ''}"
-            data-id="${ch.id}" draggable="true">
-        <span class="ch-order">${ch.order + 1}</span>
-        <span class="ch-title">${escapeHtml(ch.title) || '（未命名）'}</span>
-        <button class="ch-summary-btn" data-id="${ch.id}" title="AI 概要">📋</button>
-        <span class="ch-wc">${formatNum(ch.word_count)}</span>
-        <button class="ch-del" data-id="${ch.id}" title="删除">&times;</button>
-      </div>`
+      _chapterItemHTML(ch, ch.id === state.currentChapterId)
     ).join('');
     setupDragSort();
     // 保持侧边栏逆序状态
@@ -515,30 +485,6 @@
     }
   }
 
-  function renderMarkdown(text) {
-    let h = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    h = h.replace(/```(\w*)\n([\s\S]*?)```/g, (_, l, c) => `<pre><code class="lang-${l}">${c.trim()}</code></pre>`);
-    h = h.replace(/`([^`]+)`/g, '<code>$1</code>');
-    h = h.replace(/^#### (.+)$/gm, '<h4>$1</h4>').replace(/^### (.+)$/gm, '<h3>$1</h3>');
-    h = h.replace(/^## (.+)$/gm, '<h2>$1</h2>').replace(/^# (.+)$/gm, '<h1>$1</h1>');
-    h = h.replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>');
-    h = h.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
-    h = h.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/\*(.+?)\*/g, '<em>$1</em>');
-    h = h.replace(/^---$/gm, '<hr>');
-    const lines = h.split('\n');
-    let inB = false; const r = [];
-    for (const line of lines) {
-      if (line.startsWith('<pre>') || line.startsWith('<blockquote>') || line.startsWith('<h')) { r.push(line); inB = line.startsWith('<pre>') || line.startsWith('<blockquote>'); continue; }
-      if (inB) { r.push(line); if (line.startsWith('</pre>') || line.startsWith('</blockquote>')) inB = false; continue; }
-      if (line.trim() === '') r.push('</p><p>');
-      else if (line.startsWith('<')) r.push(line);
-      else r.push(line);
-    }
-    h = '<p>' + r.join('\n') + '</p>';
-    h = h.replace(/<\/p><p><\/p><p>/g, '</p><p>').replace(/<p><\/p>/g, '').replace(/<p><hr><\/p>/g, '<hr>');
-    return h;
-  }
-
   function focusEditor() { dom.editor.focus(); }
 
   function showEmptyState() {
@@ -557,11 +503,6 @@
       dom.searchInput?.focus();
     }
   }
-  document.addEventListener('click', (e) => {
-    const btn = e.target.closest('.activity-btn');
-    if (btn) { e.preventDefault(); switchActivity(btn.dataset.panel); }
-  });
-
   // ── 专注模式 ──
   let _focusMode = false;
   function toggleFocus() {
@@ -639,15 +580,8 @@
     if (!state.chapters.length) return;
     _sidebarReversed = !_sidebarReversed;
     const chapters = [...state.chapters].reverse();
-    // 重新渲染侧边栏
     dom.chapterList.innerHTML = chapters.map(ch =>
-      `<div class="chapter-item ${ch.id === state.currentChapterId ? 'active' : ''}"
-            data-id="${ch.id}" draggable="true">
-        <span class="ch-order">${ch.order + 1}</span>
-        <span class="ch-title">${escapeHtml(ch.title) || '（未命名）'}</span>
-        <span class="ch-wc">${formatNum(ch.word_count)}</span>
-        <button class="ch-del" data-id="${ch.id}" title="删除">&times;</button>
-      </div>`
+      _chapterItemHTML(ch, ch.id === state.currentChapterId)
     ).join('');
     _saveNovelSettings({ sidebar_reversed: _sidebarReversed });
     showToast(_sidebarReversed ? '侧边栏已逆序' : '侧边栏已恢复', 'info');
@@ -852,6 +786,9 @@
     dom.chatDock.classList.add('open');
     state.chatOpen = true;
     dom.chatModel.textContent = modelLabel();
+    // 应用保存的聊天面板宽度（覆盖 CSS 默认 380px）
+    dom.chatDock.style.width = _chatWidth + 'px';
+    dom.chatDock.style.minWidth = _chatWidth + 'px';
 
     // 切换章节：保存当前章节对话 + 恢复目标章节对话
     if (_chatChapterId !== state.currentChapterId) {
@@ -881,35 +818,28 @@
     } else {
       const modeNames = { continue: '续写', polish: '润色', expand: '扩写', condense: '缩写', rewrite: '重写', split: '拆分章节' };
       const label = modeNames[mode] || mode;
-      let msg = '';
 
       if (mode === 'continue') {
-        msg = '请根据当前章节内容续写下去，保持风格一致。';
-        addSystemMsg('已将光标前的内容作为上下文发送给 AI。');
+        addSystemMsg('已发送续写请求，AI 将结合上下文续写。');
+        sendMessage('', mode, '');
       } else if (mode === 'split') {
-        msg = '请分析本章内容，建议一个合适的拆分位置（字数位置），并给出新章节的标题建议。';
-        addSystemMsg('已发送当前章节内容进行分析。');
+        addSystemMsg('正在分析章节结构…');
+        sendMessage('', mode, '');
       } else if (mode === 'polish') {
-        if (!selectedText) {
-          const sel = getSelectedText();
-          if (!sel) { setStatus('请先在编辑器中选中文本'); closeChat(); return; }
-          selectedText = sel;
-        }
-        msg = `请润色以下文字，改进表达方式，不改变原意：\n\n${selectedText}`;
+        if (!selectedText) { selectedText = getSelectedText(); }
+        if (!selectedText) { setStatus('请先在编辑器中选中文本'); closeChat(); return; }
         addSystemMsg(`已发送选中文本（${wordCount(selectedText)} 字）进行「${label}」。`);
-      } else {
-        if (!selectedText) {
-          const sel = getSelectedText();
-          if (!sel) { setStatus('请先在编辑器中选中文本'); closeChat(); return; }
-          selectedText = sel;
-        }
-        const hints = { expand: '扩写以下文字，增加细节描写', condense: '缩写以下文字，更加精炼', rewrite: '用不同的风格重写以下文字' };
-        msg = `${hints[mode] || label}：\n\n${selectedText}`;
+        sendMessage('', mode, selectedText);
+      } else {  // expand / condense / rewrite
+        if (!selectedText) { selectedText = getSelectedText(); }
+        if (!selectedText) { setStatus('请先在编辑器中选中文本'); closeChat(); return; }
         addSystemMsg(`已发送选中文本（${wordCount(selectedText)} 字）进行「${label}」。`);
+        sendMessage('', mode, selectedText);
       }
 
-      // 自动发送
-      sendMessage(msg, mode, selectedText);
+      // 快捷模式不需要额外聚焦
+      dom.chatInput.focus();
+      return;
     }
 
     dom.chatInput.focus();
@@ -923,6 +853,9 @@
     resetChatState();
     dom.chatDock.classList.remove('open');
     state.chatOpen = false;
+    // 清除 inline style，让 CSS 的 width: 0 生效（不然会撑着布局）
+    dom.chatDock.style.width = '';
+    dom.chatDock.style.minWidth = '';
   }
 
   /** AI 在后台完成生成后，回填缓存的聊天历史 */
@@ -963,7 +896,9 @@
   }
 
   async function sendMessage(msg, mode = 'chat', selectedText = '') {
-    if (!msg.trim() || state.chatWorking) return;
+    if (state.chatWorking) return;
+    // 续写/拆分模式允许空消息（指令在 system prompt 中）
+    if (!msg.trim() && mode === 'chat') return;
 
     state.chatWorking = true;
     dom.btnSend.disabled = true;
@@ -974,8 +909,8 @@
       await saveCurrentChapter();
     }
 
-    // 添加用户消息
-    addUserMsg(msg);
+    // 添加用户消息（自动触发的模式无用户输入，不显示空白气泡）
+    if (msg.trim()) addUserMsg(msg);
 
     // 添加 AI 占位消息
     const aiMsgEl = addAssistantMsg('');
@@ -1163,81 +1098,6 @@
     focusEditor();
   }
 
-  /** 清洗 AI 输出：去掉引导语、备注、多余的标点 */
-  function cleanAIText(text) {
-    if (!text) return '';
-    let t = text.trim();
-
-    // 去掉引号包裹（AI 有时会把正文用引号括起来）
-    if (t.startsWith('「') && t.endsWith('」')) t = t.slice(1, -1).trim();
-    if (t.startsWith('"') && t.endsWith('"')) t = t.slice(1, -1).trim();
-    if (t.startsWith('"') && t.endsWith('"')) t = t.slice(1, -1).trim();
-    if (t.startsWith('「')) t = t.replace(/^「+/, '').trim();
-    if (t.endsWith('」')) t = t.replace(/」+$/, '').trim();
-
-    // 常见引导语前缀（逐行检查，去掉第一行如果是引导语）
-    const LEADERS = [
-      /^好的[，,、:：.。!！]*/,
-      /^好的吧[，,、:：.。!！]*/,
-      /^没问题[，,、:：.。!！]*/,
-      /^当然[，,、:：.。!！]*/,
-      /^可以[的了][，,、:：.。!！]*/,
-      /^我来[为你给].*?[：:：]+\s*/,
-      /^这是[你给].*?[：:：]+\s*/,
-      /^以下[是为的给]?.*?[：:：]+\s*/,
-      /^根据[你您]的.*?[，,][：:：]?\s*/,
-      /^请看[：:：]+\s*/,
-      /^(已为你|已经为你|为你|帮你).*?[：:：]+\s*/,
-      /^[零一二三四五六七八九十]+[、.．,，].*?[：:：]+\s*/,
-      /^步骤[一二三四五六七八九十]?[：:：]+\s*/,
-      /^回复[：:：]*\s*/,
-      /^答案[：:：]*\s*/,
-      /^结果[：:：]*\s*/,
-      /^修改[后版]?[：:：]*\s*/,
-      /^润色[后版]?[：:：]*\s*/,
-      /^扩写[后版]?[：:：]*\s*/,
-      /^缩写[后版]?[：:：]*\s*/,
-      /^重写[后版]?[：:：]*\s*/,
-      /^续写[结果内容]?[：:：]*\s*/,
-      /^当然[可以没问题][，,。.]*\s*/,
-      /^好[的吧了][，,。.]*\s*/,
-      /^为您.*?[：:：]+\s*/,
-      /^为你.*?[：:：]+\s*/,
-    ];
-
-    const lines = t.split('\n');
-    // 检查第一行是否匹配引导语
-    if (lines.length > 1) {
-      const first = lines[0].trim();
-      let isLeader = false;
-      for (const re of LEADERS) {
-        if (re.test(first)) { isLeader = true; break; }
-      }
-      // 也检查一些纯引导性质的关键词
-      if (/^(好的|没问题|当然|可以|请看|以下|这是我|我来|已为你)/.test(first)) isLeader = true;
-      if (isLeader) {
-        lines.shift();
-        t = lines.join('\n').trim();
-      }
-    } else {
-      // 单行也尝试清洗
-      for (const re of LEADERS) {
-        t = t.replace(re, '').trim();
-      }
-    }
-
-    // 去掉末尾的询问/备注
-    t = t.replace(/\n*你觉得怎么样[？?].*$/, '');
-    t = t.replace(/\n*如果需要[，,].*$/, '');
-    t = t.replace(/\n*希望[这这对].*$/, '');
-    t = t.replace(/\n*如有[需要疑问问题].*$/, '');
-    t = t.replace(/\n*请[告诉告知让我知道].*$/, '');
-    t = t.replace(/\(.*?\)/g, '');  // 去掉括号备注 (笑) (注) 等
-    t = t.replace(/（.*?）/g, '');  // 去掉中文括号备注
-
-    return t.trim();
-  }
-
   function scrollChat() {
     dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
   }
@@ -1282,6 +1142,175 @@
   }
 
   /* ================================================================
+     侧边栏 — 拖拽调节宽度 + 折叠/展开
+     ================================================================ */
+
+  let _sidebarWidth = 260;
+  const SIDEBAR_MIN = 140;
+  const SIDEBAR_MAX = 500;
+  const SIDEBAR_KEY = 'novel-sidebar-width';
+
+  function setupSidebar() {
+    // 恢复保存的宽度
+    try {
+      const saved = localStorage.getItem(SIDEBAR_KEY);
+      if (saved) {
+        _sidebarWidth = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, parseInt(saved, 10) || 260));
+        dom.sidebar.style.width = _sidebarWidth + 'px';
+        dom.sidebar.style.minWidth = _sidebarWidth + 'px';
+      }
+    } catch { /* ignore */ }
+
+    // 拖拽
+    let dragging = false;
+    let startX = 0;
+    let startW = 0;
+
+    function onMouseDown(e) {
+      if (dom.sidebar.classList.contains('collapsed')) return;
+      dragging = true;
+      startX = e.clientX;
+      startW = dom.sidebar.offsetWidth;
+      dom.sidebar.classList.add('dragging');
+      dom.sidebarResizeHandle.classList.add('active');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+      e.preventDefault();
+    }
+
+    function onMouseMove(e) {
+      if (!dragging) return;
+      const w = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, startW + (e.clientX - startX)));
+      dom.sidebar.style.width = w + 'px';
+      dom.sidebar.style.minWidth = w + 'px';
+    }
+
+    function onMouseUp() {
+      if (!dragging) return;
+      dragging = false;
+      dom.sidebar.classList.remove('dragging');
+      dom.sidebarResizeHandle.classList.remove('active');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      // 保存宽度
+      _sidebarWidth = dom.sidebar.offsetWidth;
+      try { localStorage.setItem(SIDEBAR_KEY, String(_sidebarWidth)); } catch { /* ignore */ }
+    }
+
+    dom.sidebarResizeHandle.addEventListener('mousedown', onMouseDown);
+
+    // 双击手柄折叠/展开
+    dom.sidebarResizeHandle.addEventListener('dblclick', toggleSidebar);
+
+    // 折叠按钮
+    dom.sidebarCollapseBtn.addEventListener('click', toggleSidebar);
+
+    // 活动栏：点击面板按钮切换（类似 VS Code：点击已激活面板折叠侧边栏）
+    dom.activityBar.addEventListener('click', (e) => {
+      const btn = e.target.closest('.activity-btn');
+      if (!btn) return;
+      const panel = btn.dataset.panel;
+      const isActive = btn.classList.contains('active');
+      if (isActive && !dom.sidebar.classList.contains('collapsed')) {
+        // 点击已激活的面板 → 折叠侧边栏
+        collapseSidebar();
+        return;
+      }
+      // 展开 + 切换面板
+      expandSidebar();
+      switchActivity(panel);
+    });
+  }
+
+  function toggleSidebar() {
+    if (dom.sidebar.classList.contains('collapsed')) {
+      expandSidebar();
+    } else {
+      collapseSidebar();
+    }
+  }
+
+  function collapseSidebar() {
+    dom.sidebar.classList.add('collapsed');
+    dom.sidebarCollapseBtn.textContent = '▶';
+    dom.sidebarCollapseBtn.title = '展开侧边栏';
+  }
+
+  function expandSidebar() {
+    dom.sidebar.classList.remove('collapsed');
+    dom.sidebar.style.width = _sidebarWidth + 'px';
+    dom.sidebar.style.minWidth = _sidebarWidth + 'px';
+    dom.sidebarCollapseBtn.textContent = '◀';
+    dom.sidebarCollapseBtn.title = '收起侧边栏';
+  }
+
+  /* ================================================================
+     AI 聊天面板 — 拖拽调节宽度
+     ================================================================ */
+
+  let _chatWidth = 380;
+  const CHAT_MIN = 240;
+  const CHAT_MAX = 700;
+  const CHAT_KEY = 'novel-chat-width';
+
+  function setupChatResize() {
+    // 恢复保存的宽度（页面加载时聊天面板关闭，仅记数值，不设 style）
+    try {
+      const saved = localStorage.getItem(CHAT_KEY);
+      if (saved) {
+        _chatWidth = Math.min(CHAT_MAX, Math.max(CHAT_MIN, parseInt(saved, 10) || 380));
+      }
+    } catch { /* ignore */ }
+
+    let dragging = false;
+    let startX = 0;
+    let startW = 0;
+
+    function onMouseDown(e) {
+      if (!dom.chatDock.classList.contains('open')) return;
+      dragging = true;
+      startX = e.clientX;
+      startW = dom.chatDock.offsetWidth;
+      dom.chatDock.classList.add('dragging');
+      dom.chatResizeHandle.classList.add('active');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+      e.preventDefault();
+    }
+
+    function onMouseMove(e) {
+      if (!dragging) return;
+      // 聊天面板在右侧，拖拽方向与侧边栏相反
+      const w = Math.min(CHAT_MAX, Math.max(CHAT_MIN, startW - (e.clientX - startX)));
+      dom.chatDock.style.width = w + 'px';
+      dom.chatDock.style.minWidth = w + 'px';
+    }
+
+    function onMouseUp() {
+      if (!dragging) return;
+      dragging = false;
+      dom.chatDock.classList.remove('dragging');
+      dom.chatResizeHandle.classList.remove('active');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      // 保存宽度
+      _chatWidth = dom.chatDock.offsetWidth;
+      if (_chatWidth < CHAT_MIN) _chatWidth = CHAT_MIN;
+      try { localStorage.setItem(CHAT_KEY, String(_chatWidth)); } catch { /* ignore */ }
+    }
+
+    dom.chatResizeHandle.addEventListener('mousedown', onMouseDown);
+  }
+
+  /* ================================================================
      键盘
      ================================================================ */
   function setupKeyboard() {
@@ -1292,6 +1321,7 @@
       if (ctrl && e.shiftKey && e.key === 'D') { e.preventDefault(); toggleTheme(); }
       if (ctrl && e.key === 'f' && !state.isPreview) {
         e.preventDefault();
+        expandSidebar();
         switchActivity('search');
         setTimeout(() => { dom.searchInput?.focus(); dom.searchInput?.select(); }, 50);
       }
@@ -1678,25 +1708,17 @@
       if (!state.chatOpen) {
         openChat(mode, sel);
       } else {
-        // 已在聊天中，直接发送
-        const modeNames = { continue: '续写', polish: '润色', expand: '扩写', condense: '缩写', rewrite: '重写', split: '拆分章节' };
-        let msg;
+        // 已在聊天中，直接发送（所有指令由后端 system prompt 处理）
         if (mode === 'continue') {
-          addSystemMsg('已根据当前章节续写。');
-          msg = '请继续写下去，保持风格一致。';
+          sendMessage('', mode, '');
         } else if (mode === 'split') {
-          addSystemMsg('正在分析章节结构…');
-          msg = '请分析本章内容，建议一个合适的拆分位置和标题。';
+          sendMessage('', mode, '');
         } else if (!sel) {
           setStatus('请先在编辑器中选中文本');
           return;
-        } else if (mode === 'polish') {
-          msg = `请润色以下文字：\n\n${sel}`;
         } else {
-          const hints = { expand: '请扩写', condense: '请缩写', rewrite: '请重写' };
-          msg = `${hints[mode] || ''}以下文字：\n\n${sel}`;
+          sendMessage('', mode, sel);
         }
-        sendMessage(msg, mode, sel);
       }
     });
   }
@@ -1710,6 +1732,10 @@
       cacheDom();
       console.log('[app.js] cacheDom done');
       initTheme();
+      setupSidebar();
+      console.log('[app.js] setupSidebar done');
+      setupChatResize();
+      console.log('[app.js] setupChatResize done');
       setupKeyboard();
       console.log('[app.js] setupKeyboard done');
       bindEvents();
