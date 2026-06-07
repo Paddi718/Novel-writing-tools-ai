@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   novel-writing-tool:
     build: .
@@ -12,3 +10,9 @@ services:
       # Mount your settings with API key (create settings.local.json and rename)
       - ./settings.json:/app/settings.json:ro
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sS", "http://127.0.0.1:8001/api/novels"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

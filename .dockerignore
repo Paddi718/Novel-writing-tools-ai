@@ -10,4 +10,7 @@ settings.json
 .idea/
 .vscode/
 .gitignore
+.gitattributes
 README.md
+migrate.py
+*.md

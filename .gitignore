@@ -4,15 +4,16 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+*.egg
 
 # Virtual environment
 venv/
 .venv/
 
 # User data & config (contains API keys and novel content)
-data/*.novel
-data/test/
+data/
 settings.json
+*.local.json
 
 # Backups & logs
 *.bak
@@ -27,4 +28,10 @@ settings.json
 *~
 .DS_Store
 Thumbs.db
+
+# Docker
+.dockerignore
+
+# Migration (one-off scripts, not part of the app)
+migrate.py
 
