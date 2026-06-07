@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>小说写作工具</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+<!-- ─── 顶部栏 ─── -->
+<header class="topbar">
+  <h1 class="topbar-title">
+    <span class="logo">📚</span>
+    <a href="/" id="homeLink">小说写作工具</a>
+  </h1>
+  <div class="topbar-actions">
+    <span id="statusText" class="status-text"></span>
+    <button class="btn" id="btnSettings" title="AI 设置">⚙️ 设置</button>
+    <button class="btn btn-primary" id="btnNewNovel">+ 新建小说</button>
+  </div>
+</header>
+
+<div class="app-layout">
+  <!-- ─── 左侧面板 ─── -->
+  <aside class="sidebar" id="sidebar">
+    <section class="panel-section">
+      <div class="panel-header"><h2>小说</h2></div>
+      <div class="novel-list" id="novelList"></div>
+    </section>
+    <section class="panel-section" id="chapterSection" style="display:none">
+      <div class="panel-header">
+        <h2>章节</h2>
+        <button class="btn btn-small" id="btnNewChapter">+</button>
+      </div>
+      <div class="chapter-list" id="chapterList"></div>
+    </section>
+  </aside>
+
+  <!-- ─── 主编辑区 ─── -->
+  <main class="main-content" id="mainContent">
+
+    <!-- 编辑器容器（与聊天停靠区水平拆分） -->
+    <div class="editor-container">
+
+      <!-- 空状态 -->
+      <div class="empty-state" id="emptyState">
+        <div class="empty-icon">✍️</div>
+        <p>选择一部小说开始写作，或点击「+ 新建小说」创建新作品</p>
+      </div>
+
+      <!-- 小说目录概览（点击小说名时显示） -->
+      <div class="novel-overview" id="novelOverview" style="display:none">
+        <div class="overview-header">
+          <div class="overview-title-row">
+            <h2 class="overview-title" id="overviewTitle"></h2>
+            <button class="btn btn-small" id="btnEditNovel" title="编辑小说信息">✏️</button>
+          </div>
+          <p class="overview-meta" id="overviewMeta"></p>
+          <p class="overview-desc" id="overviewDesc"></p>
+          <div class="overview-view-toggles">
+            <button class="toggle-btn view-btn active" data-view="list" title="单列显示">☰ 列表</button>
+            <button class="toggle-btn view-btn" data-view="grid" title="多列显示">▦ 卡片</button>
+          </div>
+        </div>
+        <div class="overview-chapters list-view" id="overviewChapters"></div>
+      </div>
+
+      <!-- 编辑器 -->
+      <div class="editor-panel" id="editorPanel" style="display:none">
+        <div class="editor-toolbar">
+          <input class="chapter-title-input" id="chapterTitle" type="text"
+                 placeholder="章节标题" spellcheck="false">
+          <div class="editor-tools">
+            <span class="word-count" id="wordCount">0 字</span>
+            <span class="chapter-status" id="chapterStatus"></span>
+            <button class="btn btn-small toggle-btn" id="btnPreview" title="切换预览">预览</button>
+            <button class="btn btn-small btn-ai" id="btnAIChat" title="AI 写作助手">✨ AI 助手</button>
+            <button class="btn btn-small btn-save" id="btnSave" title="保存 (Ctrl+S)">💾 保存</button>
+          </div>
+        </div>
+        <div class="editor-body">
+          <textarea class="editor-textarea" id="editor"
+                    placeholder="开始写作…" spellcheck="true"></textarea>
+          <div class="preview-area" id="previewArea" style="display:none"></div>
+        </div>
+      </div>
+
+      <!-- 章节概要（位于编辑器下方，固定高度可滚动） -->
+      <section class="editor-summary" id="summarySection" style="display:none">
+        <div class="editor-summary-resize-handle" id="summaryResizeHandle"></div>
+        <div class="editor-summary-header" id="summaryHeader">
+          <h3>📋 章节概要</h3>
+          <button class="btn btn-small btn-ai" id="btnRefreshSummary" title="重新生成">⟳ 刷新</button>
+          <button class="btn-summary-toggle" id="btnSummaryToggle" title="折叠/展开">▼</button>
+        </div>
+        <div class="editor-summary-content" id="summaryContent">
+          <span class="summary-placeholder">暂无概要</span>
+        </div>
+      </section>
+    </div>
+
+    <!-- ─── AI 聊天停靠区（右侧面板） ─── -->
+    <div class="chat-dock" id="chatDock">
+      <div class="chat-header">
+        <span>✨ AI 写作助手</span>
+        <span class="chat-model" id="chatModel"></span>
+        <button class="btn-close" id="btnCloseChat">&times;</button>
+      </div>
+      <div class="chat-messages" id="chatMessages"></div>
+      <div class="chat-quick" id="chatQuick">
+        <div class="ai-dropdown">
+          <button class="btn btn-small btn-ai ai-dropdown-btn" id="aiQuickBtn">✨ 功能 ▾</button>
+          <div class="ai-dropdown-menu" id="aiDropdownMenu">
+            <button class="ai-dropdown-item" data-mode="continue">📝 续写</button>
+            <button class="ai-dropdown-item" data-mode="polish">✨ 润色</button>
+            <button class="ai-dropdown-item" data-mode="expand">📖 扩写</button>
+            <button class="ai-dropdown-item" data-mode="condense">📏 缩写</button>
+            <button class="ai-dropdown-item" data-mode="rewrite">🔄 重写</button>
+            <button class="ai-dropdown-item" data-mode="split">✂️ 拆分章节</button>
+          </div>
+        </div>
+        <span class="chat-quick-tip">选中文本后选功能</span>
+      </div>
+      <div class="chat-input-area">
+        <textarea class="chat-input" id="chatInput" rows="2"
+                  placeholder="输入消息… (Enter 发送, Shift+Enter 换行)" spellcheck="false"></textarea>
+        <div class="chat-input-actions">
+          <span class="chat-tip">Enter · Shift+Enter 换行</span>
+          <button class="btn btn-primary btn-send" id="btnSend" disabled>发送</button>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- ─── AI 设置弹窗 ─── -->
+<div class="modal-overlay" id="settingsOverlay" style="display:none">
+  <div class="modal modal-settings">
+    <h2 class="modal-title">⚙️ AI 设置</h2>
+    <form id="settingsForm">
+      <label class="form-label">
+        AI 提供商
+        <select class="form-input" name="provider" id="selProvider">
+          <option value="claude">Claude CLI（本地）</option>
+          <option value="openai">OpenAI 兼容 API</option>
+          <option value="anthropic">Anthropic API</option>
+        </select>
+      </label>
+      <label class="form-label" id="apiKeyLabel">
+        API 密钥
+        <input class="form-input" name="api_key" type="password"
+               placeholder="sk-..." spellcheck="false">
+      </label>
+      <label class="form-label">
+        API 地址（可选，仅 OpenAI 兼容）
+        <input class="form-input" name="api_base" type="url"
+               placeholder="https://api.openai.com/v1" spellcheck="false">
+      </label>
+      <label class="form-label">
+        模型（留空使用默认）
+        <input class="form-input" name="model" type="text"
+               placeholder="gpt-4o / claude-sonnet-4-6" spellcheck="false">
+      </label>
+      <div class="settings-row">
+        <label class="form-label settings-half">
+          最大 Token
+          <input class="form-input" name="max_tokens" type="number" value="4096" min="256" max="128000">
+        </label>
+        <label class="form-label settings-half">
+          温度
+          <input class="form-input" name="temperature" type="range" value="0.7" min="0" max="2" step="0.05" id="tempSlider">
+          <span class="temp-value" id="tempValue">0.70</span>
+        </label>
+      </div>
+      <label class="form-label">
+        AI 续写字数（0 为不限）
+        <input class="form-input" name="target_length" type="number" value="0" min="0" max="100000" step="100"
+               placeholder="0=不限，建议 500-2000">
+      </label>
+      <div class="modal-actions">
+        <button type="button" class="btn" id="btnCancelSettings">取消</button>
+        <button type="submit" class="btn btn-primary">保存设置</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ─── 新建小说弹窗 ─── -->
+<div class="modal-overlay" id="modalOverlay" style="display:none">
+  <div class="modal">
+    <h2 class="modal-title">新建小说</h2>
+    <form id="newNovelForm">
+      <label class="form-label">
+        书名 <input class="form-input" name="title" required autofocus>
+      </label>
+      <label class="form-label">
+        作者 <input class="form-input" name="author" placeholder="可选">
+      </label>
+      <label class="form-label">
+        简介 <textarea class="form-input form-textarea" name="description" placeholder="可选" rows="3"></textarea>
+      </label>
+      <div class="modal-actions">
+        <button type="button" class="btn" id="btnCancelModal">取消</button>
+        <button type="submit" class="btn btn-primary">创建</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ─── 编辑小说弹窗 ─── -->
+<div class="modal-overlay" id="editNovelOverlay" style="display:none">
+  <div class="modal">
+    <h2 class="modal-title">编辑小说信息</h2>
+    <form id="editNovelForm">
+      <label class="form-label">
+        书名 <input class="form-input" name="title" id="editNovelTitle" required autofocus>
+      </label>
+      <label class="form-label">
+        作者 <input class="form-input" name="author" id="editNovelAuthor" placeholder="可选">
+      </label>
+      <label class="form-label">
+        简介 <textarea class="form-input form-textarea" name="description" id="editNovelDesc" placeholder="可选" rows="3"></textarea>
+      </label>
+      <div class="modal-actions">
+        <button type="button" class="btn" id="btnCancelEditNovel">取消</button>
+        <button type="submit" class="btn btn-primary">保存</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="/js/api.js?v=16"></script>
+<script src="/js/app.js?v=16"></script>
+</body>
+</html>

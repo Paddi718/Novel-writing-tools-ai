@@ -1,0 +1,14 @@
+version: "3.9"
+
+services:
+  novel-writing-tool:
+    build: .
+    container_name: novel-writing-tool
+    ports:
+      - "8001:8001"
+    volumes:
+      # Persist novel data outside the container
+      - ./data:/app/data
+      # Mount your settings with API key (create settings.local.json and rename)
+      - ./settings.json:/app/settings.json:ro
+    restart: unless-stopped

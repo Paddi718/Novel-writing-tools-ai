@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+venv/
+.venv/
+
+# User data & config (contains API keys and novel content)
+data/*.novel
+data/test/
+settings.json
+
+# Backups & logs
+*.bak
+*.log
+
+# IDE / OS
+.claude/
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
