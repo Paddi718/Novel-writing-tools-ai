@@ -40,36 +40,91 @@ VS Code 风格的三栏布局：活动栏 → 侧边栏 → 主编辑区 + AI �
 
 ### 前置条件
 
-- **Python 3.13+**
-- （可选）Node.js + `@anthropic-ai/claude-code`（使用 Claude CLI 本地模式时）
+- **Python 3.13+** — [官网下载](https://www.python.org/downloads/)
+- **Git** — [官网下载](https://git-scm.com/downloads)
+- （可选）**Node.js 18+** + `@anthropic-ai/claude-code`（使用 Claude CLI 本地模式时）
 
 ### 本地运行
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/your-username/novel-writing-tool.git
-cd novel-writing-tool
+git clone https://github.com/Paddi718/Novel-writing-tools-ai.git
+cd Novel-writing-tools-ai
 
-# 2. 安装依赖
+# 2. 创建虚拟环境（推荐）
+python -m venv venv
+
+# 3. 激活虚拟环境
+# Windows:
+venv\Scripts\activate
+# macOS / Linux:
+# source venv/bin/activate
+
+# 4. 升级 pip 并安装依赖
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 
-# 3. 启动
+# 5. 启动服务
 python run.py
 ```
 
-访问 `http://127.0.0.1:8001`。
+启动后终端显示：
+```
+小说写作工具启动：http://127.0.0.1:8001
+数据目录：...\data
+```
+
+浏览器打开 `http://127.0.0.1:8001` 即可使用。
+
+> **首次使用**：点击右上角 ⚙️ 设置，选择 AI 提供商并填写 API Key（Claude CLI 模式无需 Key）。
 
 ### Docker
 
-```bash
-# 构建并启动
-docker compose up -d
+#### 前置条件
 
-# 查看日志
+- **Docker** — [官网下载](https://www.docker.com/products/docker-desktop/)
+- **Docker Compose**（Docker Desktop 已内置）
+
+#### 运行步骤
+
+```bash
+# 1. 克隆仓库
+git clone https://github.com/Paddi718/Novel-writing-tools-ai.git
+cd Novel-writing-tools-ai
+
+# 2. 创建 AI 设置文件（按需修改）
+echo '{"provider":"claude","temperature":0.7,"api_key":"","api_base":"","model":"","max_tokens":4096}' > settings.json
+
+# 3. 创建数据目录
+mkdir -p data
+
+# 4. 构建并启动
+docker compose up -d --build
+
+# 5. 查看启动日志
 docker compose logs -f
+
+# 6. 确认健康检查通过（等待约 10 秒）
+docker compose ps
 ```
 
-访问 `http://127.0.0.1:8001`。
+出现 `healthy` 状态后，浏览器打开 `http://localhost:8001`。
+
+#### 常用命令
+
+```bash
+# 停止服务
+docker compose down
+
+# 重启服务（代码更新后）
+docker compose up -d --build
+
+# 查看实时日志
+docker compose logs -f
+
+# 进入容器
+docker compose exec novel-writing-tool /bin/bash
+```
 
 ## 配置
 
