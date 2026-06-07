@@ -57,6 +57,7 @@ def _build_novel_response(name: str, data: dict,
         "chapters": chapter_list,
         "chapter_count": len(chapter_list),
         "total_words": total_words,
+        "settings": data.get("settings", {}),
     }
 
 
@@ -92,6 +93,7 @@ def create_novel(data: NovelCreate) -> dict | None:
             "updated_at": now,
         },
         "chapters": [],
+        "settings": {},
     }
     save_novel(name, novel_data)
     return {

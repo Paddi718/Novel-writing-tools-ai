@@ -44,3 +44,12 @@ class AISettings(BaseModel):
     max_tokens: int = 4096
     temperature: float = 0.7
     target_length: int = 0
+    writing_instruction: str = ""
+
+
+class NovelSettings(BaseModel):
+    """每部小说的独立 UI 配置"""
+    last_chapter_id: str = ""
+    overview_view: str = "grid"  # "grid" | "list"
+    overview_reversed: bool = False
+    sidebar_reversed: bool = False

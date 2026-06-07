@@ -15,6 +15,9 @@ def build_system_context(name: str, chapter_id: str, data) -> str:
     if novel_data is None:
         return "小说不存在"
 
+    settings = load_settings()
+    custom_instruction = (settings.get("writing_instruction") or "").strip()
+
     chapters = novel_data.get("chapters", [])
     chapter = next((ch for ch in chapters if ch["id"] == chapter_id), None)
     if chapter is None:
@@ -24,8 +27,10 @@ def build_system_context(name: str, chapter_id: str, data) -> str:
     full_content = chapter.get("content", "")
     summary_text = chapter.get("summary", "").strip()
 
-    # ─── 第 1 层：基础身份 ───
+    # ─── 第 1 层：基础身份 + 自定义指令 ───
     parts = ["你是专业的小说写作助手。"]
+    if custom_instruction:
+        parts.append(f"【用户自定义写作要求】\n{custom_instruction}")
 
     # ─── 第 2 层：模式指令 ───
     mode_notes = []

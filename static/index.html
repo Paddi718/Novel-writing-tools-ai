@@ -16,25 +16,54 @@
   </h1>
   <div class="topbar-actions">
     <span id="statusText" class="status-text"></span>
-    <button class="btn" id="btnSettings" title="AI 设置">⚙️ 设置</button>
+    <button class="btn-theme" id="btnTheme" title="切换夜晚模式">🌙</button>
+<button class="btn btn-small" id="btnExportDialog" title="导出章节">📦 导出</button>
+<button class="btn-theme" id="btnFocus" title="专注模式">🔲</button>
+            <button class="btn" id="btnSettings" title="AI 设置">⚙️ 设置</button>
     <button class="btn btn-primary" id="btnNewNovel">+ 新建小说</button>
   </div>
 </header>
 
 <div class="app-layout">
-  <!-- ─── 左侧面板 ─── -->
+  <!-- ─── 左侧活动栏（类 VS Code） ─── -->
+  <div class="activity-bar" id="activityBar">
+    <div class="activity-items">
+      <button class="activity-btn active" data-panel="novels" title="小说">📚</button>
+      <button class="activity-btn" data-panel="search" title="搜索">🔍</button>
+    </div>
+  </div>
+
+  <!-- ─── 侧边栏面板 ─── -->
   <aside class="sidebar" id="sidebar">
-    <section class="panel-section">
-      <div class="panel-header"><h2>小说</h2></div>
-      <div class="novel-list" id="novelList"></div>
-    </section>
-    <section class="panel-section" id="chapterSection" style="display:none">
-      <div class="panel-header">
-        <h2>章节</h2>
-        <button class="btn btn-small" id="btnNewChapter">+</button>
+    <!-- 小说 + 章节面板 -->
+    <div class="sidebar-panel active" data-panel="novels">
+      <section class="panel-section">
+        <div class="panel-header"><h2>小说</h2></div>
+        <div class="novel-list" id="novelList"></div>
+      </section>
+      <section class="panel-section" id="chapterSection" style="display:none">
+        <div class="panel-header">
+          <h2>章节</h2>
+          <div class="panel-header-actions">
+            <button class="btn btn-small" id="btnReverseSidebar" title="逆序排列">↕</button>
+            <button class="btn btn-small" id="btnNewChapter">+</button>
+          </div>
+        </div>
+        <div class="chapter-list" id="chapterList"></div>
+      </section>
+    </div>
+    <!-- 搜索面板 -->
+    <div class="sidebar-panel" data-panel="search">
+      <div class="sidebar-search">
+        <div class="search-context" id="searchContext"></div>
+        <div class="search-scope">
+          <button class="scope-btn active" data-scope="all">全文检索</button>
+          <button class="scope-btn" data-scope="chapter">本章检索</button>
+        </div>
+        <input class="search-input" id="searchInput" type="text" placeholder="输入搜索关键词…" spellcheck="false">
+        <div class="search-results" id="searchResults"></div>
       </div>
-      <div class="chapter-list" id="chapterList"></div>
-    </section>
+    </div>
   </aside>
 
   <!-- ─── 主编辑区 ─── -->
@@ -58,12 +87,21 @@
           </div>
           <p class="overview-meta" id="overviewMeta"></p>
           <p class="overview-desc" id="overviewDesc"></p>
-          <div class="overview-view-toggles">
-            <button class="toggle-btn view-btn active" data-view="list" title="单列显示">☰ 列表</button>
-            <button class="toggle-btn view-btn" data-view="grid" title="多列显示">▦ 卡片</button>
+          <div class="overview-novel-summary" id="overviewNovelSummary" style="display:none">
+            <div class="overview-ns-header">📖 全文梗概</div>
+            <div class="overview-ns-content" id="overviewNSContent"></div>
+            <button class="overview-ns-toggle" id="overviewNSToggle">展开全部 ▼</button>
+          </div>
+          <div class="overview-actions" id="overviewActions">
+            <div class="overview-export-bar" id="overviewExportBar"></div>
+            <div class="overview-view-toggles">
+              <button class="toggle-btn view-btn" data-view="list" title="单列显示">☰ 列表</button>
+              <button class="toggle-btn view-btn active" data-view="grid" title="多列显示">▦ 卡片</button>
+              <button class="toggle-btn view-btn" id="btnReverseOrder" title="逆序排列">↕ 逆序</button>
+            </div>
           </div>
         </div>
-        <div class="overview-chapters list-view" id="overviewChapters"></div>
+        <div class="overview-chapters grid-view" id="overviewChapters"></div>
       </div>
 
       <!-- 编辑器 -->
@@ -179,6 +217,11 @@
         <input class="form-input" name="target_length" type="number" value="0" min="0" max="100000" step="100"
                placeholder="0=不限，建议 500-2000">
       </label>
+      <label class="form-label">
+        自定义写作指令（选填，每次 AI 请求自动带入）
+        <textarea class="form-input form-textarea" name="writing_instruction" rows="3"
+                  placeholder="例如：故事是玄幻修仙风格，主角性格坚毅冷静，语言简洁有力避免啰嗦描写，世界观设定参考东方玄幻…"></textarea>
+      </label>
       <div class="modal-actions">
         <button type="button" class="btn" id="btnCancelSettings">取消</button>
         <button type="submit" class="btn btn-primary">保存设置</button>
@@ -231,6 +274,53 @@
   </div>
 </div>
 
+<!-- ─── 新建章节弹窗 ─── -->
+<div class="modal-overlay" id="newChapterOverlay" style="display:none">
+  <div class="modal">
+    <h2 class="modal-title">📝 新建章节</h2>
+    <form id="newChapterForm">
+      <label class="form-label">
+        章节标题
+        <input class="form-input" name="title" id="newChapterTitle" required autofocus
+               placeholder="输入章节标题…" spellcheck="false">
+      </label>
+      <div class="modal-actions">
+        <button type="button" class="btn" id="btnCancelNewChapter">取消</button>
+        <button type="submit" class="btn btn-primary">创建</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="toastContainer" class="toast-container"></div>
+
+<!-- ─── 导出章节弹窗 ─── -->
+<div class="modal-overlay" id="exportDialogOverlay" style="display:none">
+  <div class="modal modal-export">
+    <h2 class="modal-title">📦 导出章节</h2>
+    <p class="export-dialog-desc">选择要导出的章节，打包为 ZIP 压缩包</p>
+    <div class="export-format-select">
+      <label class="export-format-option active" data-format="txt">
+        <input type="radio" name="exportFormat" value="txt" checked> <strong>.txt</strong> 纯文本
+      </label>
+      <label class="export-format-option" data-format="md">
+        <input type="radio" name="exportFormat" value="md"> <strong>.md</strong> Markdown
+      </label>
+    </div>
+    <div class="export-dialog-actions">
+      <button class="btn btn-small" id="btnExportSelectAll">全选</button>
+      <button class="btn btn-small" id="btnExportDeselectAll">取消全选</button>
+      <span class="export-dialog-count" id="exportDialogCount">已选 0 章</span>
+    </div>
+    <div class="export-dialog-list" id="exportDialogList">
+      <!-- 由 JS 填充 -->
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn" id="btnCancelExport">取消</button>
+      <button type="button" class="btn btn-primary" id="btnConfirmExport">导出选中章节</button>
+    </div>
+  </div>
+</div>
 <script src="/js/api.js?v=16"></script>
 <script src="/js/app.js?v=16"></script>
 </body>

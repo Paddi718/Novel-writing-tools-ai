@@ -18,6 +18,7 @@
     aiSettings: null,
     chatOpen: false,
     chatWorking: false,
+    novelSettings: { last_chapter_id: '', overview_view: 'grid', overview_reversed: false, sidebar_reversed: false },
     lastAIMode: 'chat',  // 跟踪最近一次 AI 交互模式
   };
 
@@ -29,18 +30,24 @@
 
   function cacheDom() {
     const ids = [
-      'novelList', 'chapterSection', 'chapterList',
+      'novelList', 'chapterSection', 'chapterList', 'searchInput', 'searchResults',
       'emptyState', 'novelOverview', 'editorPanel', 'chapterTitle',
       'editor', 'previewArea', 'wordCount', 'chapterStatus',
-      'statusText', 'btnNewNovel', 'btnNewChapter', 'btnSave',
+      'statusText', 'btnTheme', 'btnFocus', 'btnNewNovel', 'btnNewChapter', 'btnSave',
       'btnPreview', 'homeLink',
       'modalOverlay', 'newNovelForm', 'btnCancelModal',
+      'newChapterOverlay', 'newChapterForm', 'newChapterTitle', 'btnCancelNewChapter',
       'btnSettings', 'settingsOverlay', 'settingsForm',
       'btnCancelSettings', 'selProvider', 'tempSlider', 'tempValue',
       'btnAIChat', 'chatDock', 'chatMessages', 'chatInput',
       'summarySection', 'summaryContent', 'btnRefreshSummary',
       'btnSend', 'btnCloseChat', 'chatModel', 'chatQuick',
+      'btnExportDialog', 'btnReverseOrder', 'btnReverseSidebar', 'exportDialogOverlay', 'exportDialogList',
+      'searchContext',
+      'exportDialogCount', 'btnExportSelectAll', 'btnExportDeselectAll',
+      'btnCancelExport', 'btnConfirmExport',
       'overviewTitle', 'overviewMeta', 'overviewDesc', 'overviewChapters',
+      'overviewNovelSummary', 'overviewNSContent', 'overviewNSToggle', 'overviewExportBar',
       'btnEditNovel', 'editNovelOverlay', 'editNovelForm',
       'editNovelTitle', 'editNovelAuthor', 'editNovelDesc', 'btnCancelEditNovel',
       'summaryHeader', 'btnSummaryToggle', 'summaryResizeHandle',
@@ -63,6 +70,16 @@
 
   function setStatus(msg) { dom.statusText.textContent = msg; }
 
+  function showToast(msg, type = 'info') {
+    const container = document.getElementById('toastContainer');
+    if (!container) return;
+    const el = document.createElement('div');
+    el.className = `toast ${type}`;
+    el.textContent = msg;
+    container.appendChild(el);
+    setTimeout(() => { if (el.parentNode) el.remove(); }, 3000);
+  }
+
   function debounce(fn, ms) {
     let timer;
     return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), ms); };
@@ -78,6 +95,14 @@
     if (n >= 10000) return (n / 10000).toFixed(1) + 'w';
     if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
     return String(n);
+  }
+
+  /** 搜索结果高亮 */
+  function highlightText(text, query) {
+    if (!query) return escapeHtml(text);
+    const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const re = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+    return escaped.replace(re, '<em>$1</em>');
   }
 
   /** 从结构化概要中提取【概要】部分 */
@@ -105,16 +130,32 @@
   }
 
   function renderNovelList() {
-    dom.novelList.innerHTML = state.novels.map(n =>
-      `<div class="novel-item ${n.name === state.currentNovelName ? 'active' : ''}"
-            data-name="${escapeHtml(n.name)}">
-        <span class="novel-title">${escapeHtml(n.title)}</span>
-        <span class="novel-meta">${n.chapter_count} 章 · ${formatNum(n.total_words)} 字${n.author ? ' · ' + escapeHtml(n.author) : ''}</span>
-      </div>`
-    ).join('');
-    dom.novelList.addEventListener('click', (e) => {
-      const item = e.target.closest('.novel-item');
-      if (item) selectNovel(item.dataset.name);
+    // 下拉选择器
+    let html = `<select class="novel-select" id="novelSelect">
+      <option value="">— 选择小说 —</option>`;
+    state.novels.forEach(n => {
+      const sel = n.name === state.currentNovelName ? ' selected' : '';
+      html += `<option value="${escapeHtml(n.name)}"${sel}>${escapeHtml(n.title)}</option>`;
+    });
+    html += `</select>`;
+    // 当前小说详情 + 目录概览按钮
+    const cur = state.novels.find(n => n.name === state.currentNovelName);
+    if (cur) {
+      html += `<div class="novel-info">
+        <span class="novel-meta">${cur.chapter_count} 章 · ${formatNum(cur.total_words)} 字${cur.author ? ' · ' + escapeHtml(cur.author) : ''}</span>
+      </div>`;
+      html += `<button class="btn btn-overview" id="btnOverviewSidebar">📖 目录概览</button>`;
+    }
+    dom.novelList.innerHTML = html;
+
+    const sel = document.getElementById('novelSelect');
+    if (sel) {
+      sel.addEventListener('change', () => {
+        if (sel.value) selectNovel(sel.value);
+      });
+    }
+    document.getElementById('btnOverviewSidebar')?.addEventListener('click', async () => {
+      await goToOverview();
     });
   }
 
@@ -124,11 +165,31 @@
     closeChat();
     hideEditor();
     hideOverview();
-    if (!name) { showEmptyState(); return; }
-    dom.novelList.querySelectorAll('.novel-item').forEach(el =>
-      el.classList.toggle('active', el.dataset.name === name));
+    if (!name) { showEmptyState(); renderNovelList(); return; }
     await loadChapters();
-    await loadNovelOverview();  // 加载目录概览
+    renderNovelList();
+    // 先从服务端加载设置（含 last_chapter_id 等）
+    let overviewData = null;
+    try {
+      overviewData = await API.getNovelOverview(state.currentNovelName);
+      if (overviewData) _applyNovelSettings(overviewData.settings || {});
+    } catch { /* ignore */ }
+    // 检查是否有上次编辑的章节
+    const lastChapterId = state.novelSettings.last_chapter_id;
+    const hasLastChapter = lastChapterId && state.chapters.some(c => c.id === lastChapterId);
+    if (hasLastChapter) {
+      // 有上次编辑记录 → 直接加载章节，跳过概览
+      await selectChapter(lastChapterId);
+    } else if (overviewData) {
+      // 首次打开 → 显示目录概览
+      renderNovelOverview(overviewData);
+      showOverview();
+    }
+    // 恢复侧边栏逆序
+    if (_sidebarReversed) {
+      const items = [...dom.chapterList.querySelectorAll('.chapter-item')];
+      items.reverse().forEach(el => dom.chapterList.appendChild(el));
+    }
     setStatus(name);
   }
 
@@ -200,6 +261,7 @@
     dom.chapterList.innerHTML = state.chapters.map(ch =>
       `<div class="chapter-item ${ch.id === state.currentChapterId ? 'active' : ''}"
             data-id="${ch.id}" draggable="true">
+        <span class="ch-order">${ch.order + 1}</span>
         <span class="ch-title">${escapeHtml(ch.title) || '（未命名）'}</span>
         <button class="ch-summary-btn" data-id="${ch.id}" title="AI 概要">📋</button>
         <span class="ch-wc">${formatNum(ch.word_count)}</span>
@@ -207,12 +269,17 @@
       </div>`
     ).join('');
     setupDragSort();
+    // 保持侧边栏逆序状态
+    if (_sidebarReversed) {
+      const items = [...dom.chapterList.querySelectorAll('.chapter-item')];
+      items.reverse().forEach(el => dom.chapterList.appendChild(el));
+    }
   }
 
   // 章节列表点击委托（在 bindEvents 中绑定一次）
 
-  async function selectChapter(chapterId) {
-    if (state.currentChapterId === chapterId) return;
+  async function selectChapter(chapterId, searchQuery) {
+    if (state.currentChapterId === chapterId && !searchQuery) return;
     resetChatState();
     closeChat();
     if (state.modified) {
@@ -221,18 +288,21 @@
       _savingWithoutReload = false;
     }
     state.currentChapterId = chapterId;
+    _pendingSearchQuery = searchQuery || '';
     hideOverview();
+    _saveNovelSettings({ last_chapter_id: chapterId });
     await loadChapterContent(chapterId);
   }
 
   let _loadChapterReqId = 0;
+  let _pendingSearchQuery = '';
 
   async function loadChapterContent(chapterId) {
     if (!state.currentNovelName || !chapterId) return;
     const reqId = ++_loadChapterReqId;
     try {
       const ch = await API.getChapter(state.currentNovelName, chapterId);
-      if (_loadChapterReqId !== reqId) return; // 过期响应，忽略
+      if (_loadChapterReqId !== reqId) return;
       dom.chapterTitle.value = ch.title || '';
       dom.editor.value = ch.content || '';
       dom.editorPanel.style.display = 'flex';
@@ -243,6 +313,27 @@
       dom.chapterList.querySelectorAll('.chapter-item').forEach(el =>
         el.classList.toggle('active', el.dataset.id === chapterId));
       focusEditor();
+      // 跳转到搜索关键词位置（延时确保 textarea 布局完成）
+      if (_pendingSearchQuery) {
+        const query = _pendingSearchQuery;
+        _pendingSearchQuery = '';
+        setTimeout(() => {
+          const ta = dom.editor;
+          const idx = ta.value.toLowerCase().indexOf(query.toLowerCase());
+          if (idx >= 0) {
+            ta.selectionStart = idx;
+            ta.selectionEnd = idx + query.length;
+            // 行数 × 行高计算滚动位置
+            const preText = ta.value.slice(0, idx);
+            const lines = preText.split('\n').length;
+            const lh = parseInt(getComputedStyle(ta).lineHeight) || 24;
+            const target = Math.max(0, lines * lh - ta.clientHeight / 3);
+            ta.scrollTop = target;
+            // 聚焦确保选中可见
+            ta.focus();
+          }
+        }, 100);
+      }
       // 自动加载概要
       _loadSummaryIfExists(chapterId);
     } catch (e) {
@@ -313,9 +404,20 @@
     }
   }, 1500);
 
-  async function createChapter() {
-    const title = prompt('新章节标题：');
+  function openNewChapterModal() {
+    if (!state.currentNovelName) { showToast('请先选择一部小说', 'error'); return; }
+    dom.newChapterTitle.value = '';
+    dom.newChapterOverlay.style.display = 'flex';
+    setTimeout(() => dom.newChapterTitle.focus(), 100);
+  }
+
+  function closeNewChapterModal() {
+    dom.newChapterOverlay.style.display = 'none';
+  }
+
+  async function createChapter(title) {
     if (!title || !state.currentNovelName) return;
+    closeNewChapterModal();
     try {
       await API.createChapter(state.currentNovelName, { title });
       await loadChapters();
@@ -447,9 +549,150 @@
     closeChat();
   }
 
+  // ── 活动栏切换 ──
+  function switchActivity(panelId) {
+    document.querySelectorAll('.activity-btn').forEach(b => b.classList.toggle('active', b.dataset.panel === panelId));
+    document.querySelectorAll('.sidebar-panel').forEach(p => p.classList.toggle('active', p.dataset.panel === panelId));
+    if (panelId === 'search') {
+      dom.searchInput?.focus();
+    }
+  }
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.activity-btn');
+    if (btn) { e.preventDefault(); switchActivity(btn.dataset.panel); }
+  });
+
+  // ── 专注模式 ──
+  let _focusMode = false;
+  function toggleFocus() {
+    _focusMode = !_focusMode;
+    document.body.classList.toggle('focus-mode', _focusMode);
+    dom.btnFocus.textContent = _focusMode ? '📖' : '🔲';
+    dom.btnFocus.title = _focusMode ? '退出专注模式' : '专注模式';
+    if (_focusMode) closeChat();
+  }
+
+  // ── 导出弹窗 ──
+  function openExportDialog() {
+    if (!state.currentNovelName || !state.chapters.length) {
+      showToast('请先选择一部小说', 'error');
+      return;
+    }
+    const chapters = state.chapters;
+    dom.exportDialogList.innerHTML = chapters.map(ch =>
+      `<label class="export-dialog-item">
+        <input type="checkbox" class="edi-cb" data-id="${ch.id}" checked>
+        <span class="edi-title">第${ch.order + 1}章 ${escapeHtml(ch.title)}</span>
+        <span class="edi-wc">${formatNum(ch.word_count)} 字</span>
+      </label>`
+    ).join('');
+    updateExportCount();
+    dom.exportDialogOverlay.style.display = 'flex';
+  }
+
+  function updateExportCount() {
+    const checked = dom.exportDialogList.querySelectorAll('.edi-cb:checked').length;
+    dom.exportDialogCount.textContent = `已选 ${checked} 章`;
+  }
+
+  function closeExportDialog() {
+    dom.exportDialogOverlay.style.display = 'none';
+  }
+
+  async function confirmExport() {
+    const checked = [...dom.exportDialogList.querySelectorAll('.edi-cb:checked')];
+    if (!checked.length) { showToast('请至少选择一章', 'error'); return; }
+    const ids = checked.map(cb => cb.dataset.id);
+    const name = state.currentNovelName;
+    // 读取选中的导出格式
+    const fmtEl = document.querySelector('input[name="exportFormat"]:checked');
+    const fmt = fmtEl ? fmtEl.value : 'txt';
+    closeExportDialog();
+    try {
+      const url = `/api/novels/${encodeURIComponent(name)}/export/zip-selected`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chapter_ids: ids, format: fmt }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || '导出失败');
+      }
+      const blob = await res.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `${name}_selected.zip`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      showToast(`已导出 ${ids.length} 章（${fmt.toUpperCase()}）`, 'success');
+    } catch (e) {
+      showToast('导出失败：' + e.message, 'error');
+    }
+  }
+
+  // ── 章节逆序（各自独立，纯前端） ──
+  let _sidebarReversed = false;
+  let _overviewReversed = false;
+
+  function reverseSidebar() {
+    if (!state.chapters.length) return;
+    _sidebarReversed = !_sidebarReversed;
+    const chapters = [...state.chapters].reverse();
+    // 重新渲染侧边栏
+    dom.chapterList.innerHTML = chapters.map(ch =>
+      `<div class="chapter-item ${ch.id === state.currentChapterId ? 'active' : ''}"
+            data-id="${ch.id}" draggable="true">
+        <span class="ch-order">${ch.order + 1}</span>
+        <span class="ch-title">${escapeHtml(ch.title) || '（未命名）'}</span>
+        <span class="ch-wc">${formatNum(ch.word_count)}</span>
+        <button class="ch-del" data-id="${ch.id}" title="删除">&times;</button>
+      </div>`
+    ).join('');
+    _saveNovelSettings({ sidebar_reversed: _sidebarReversed });
+    showToast(_sidebarReversed ? '侧边栏已逆序' : '侧边栏已恢复', 'info');
+  }
+
+  function reverseOverview() {
+    if (!state.currentNovelName) return;
+    _overviewReversed = !_overviewReversed;
+    const blocks = [...dom.overviewChapters.querySelectorAll('.overview-chapter-block')];
+    blocks.reverse().forEach(el => dom.overviewChapters.appendChild(el));
+    _saveNovelSettings({ overview_reversed: _overviewReversed });
+    showToast(_overviewReversed ? '概览已逆序' : '概览已恢复', 'info');
+  }
+
+  // ── 主题切换 ──
+  function initTheme() {
+    const saved = localStorage.getItem('novel-theme');
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const dark = saved ? saved === 'dark' : prefersDark;
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    dom.btnTheme.textContent = dark ? '☀️' : '🌙';
+  }
+  function toggleTheme() {
+    const current = document.documentElement.getAttribute('data-theme');
+    const dark = current !== 'dark';
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    localStorage.setItem('novel-theme', dark ? 'dark' : 'light');
+    dom.btnTheme.textContent = dark ? '☀️' : '🌙';
+  }
+
   function hideEditor() {
     dom.editorPanel.style.display = 'none';
     dom.summarySection.style.display = 'none';
+  }
+
+  /** 从编辑器返回目录概览 */
+  async function goToOverview() {
+    if (!state.currentNovelName) return;
+    if (state.currentChapterId && state.modified) {
+      await saveCurrentChapter();
+    }
+    state.currentChapterId = null;
+    hideEditor();
+    closeChat();
+    await loadNovelOverview();
   }
 
   // ── 小说目录概览 ──
@@ -465,11 +708,54 @@
     dom.novelOverview.style.display = 'none';
   }
 
+  /** 应用小说设置：视图模式、逆序状态 */
+  function _applyNovelSettings(settings) {
+    if (!settings) return;
+    state.novelSettings = {
+      last_chapter_id: settings.last_chapter_id || '',
+      overview_view: settings.overview_view || 'grid',
+      overview_reversed: !!settings.overview_reversed,
+      sidebar_reversed: !!settings.sidebar_reversed,
+    };
+    // 恢复概览视图模式
+    const view = state.novelSettings.overview_view;
+    const toggles = dom.overviewViewToggles;
+    if (toggles) {
+      toggles.querySelectorAll('.view-btn').forEach(b => b.classList.toggle('active', b.dataset.view === view));
+    }
+    dom.overviewChapters.classList.toggle('list-view', view === 'list');
+    dom.overviewChapters.classList.toggle('grid-view', view === 'grid');
+    // 恢复逆序状态（由各自的函数处理）
+    _overviewReversed = state.novelSettings.overview_reversed;
+    _sidebarReversed = state.novelSettings.sidebar_reversed;
+  }
+
+  /** 保存局部设置到后端（合并当前设置） */
+  let _settingsSaveTimer = null;
+  function _saveNovelSettings(partial) {
+    if (!state.currentNovelName) return;
+    // 先合并到内存
+    Object.assign(state.novelSettings, partial);
+    // 防抖保存
+    clearTimeout(_settingsSaveTimer);
+    _settingsSaveTimer = setTimeout(async () => {
+      try {
+        await API.updateNovelSettings(state.currentNovelName, state.novelSettings);
+      } catch { /* 静默失败，不影响用户操作 */ }
+    }, 500);
+  }
+
   async function loadNovelOverview() {
     if (!state.currentNovelName) return;
     try {
       const data = await API.getNovelOverview(state.currentNovelName);
       renderNovelOverview(data);
+      _applyNovelSettings(data.settings || {});
+      // 恢复概览逆序
+      if (_overviewReversed) {
+        const blocks = [...dom.overviewChapters.querySelectorAll('.overview-chapter-block')];
+        blocks.reverse().forEach(el => dom.overviewChapters.appendChild(el));
+      }
       showOverview();
     } catch (e) {
       console.error(e);
@@ -478,6 +764,7 @@
   }
 
   function renderNovelOverview(data) {
+    const name = state.currentNovelName;
     dom.overviewTitle.textContent = data.title || data.name;
     const metaParts = [];
     if (data.author) metaParts.push(`作者：${data.author}`);
@@ -486,12 +773,51 @@
     dom.overviewMeta.textContent = metaParts.join('  ·  ');
     dom.overviewDesc.textContent = data.description || '';
 
+    // 加载全文梗概
+    API.getNovelSummary(name).then(result => {
+      if (result.summary) {
+        dom.overviewNSContent.innerHTML = renderMarkdown(result.summary);
+        dom.overviewNSContent.classList.remove('expanded');
+        dom.overviewNSToggle.textContent = '展开全部 ▼';
+        dom.overviewNovelSummary.style.display = 'block';
+      } else {
+        dom.overviewNovelSummary.style.display = 'none';
+      }
+    }).catch(() => { dom.overviewNovelSummary.style.display = 'none'; });
+
+    // 导出 + 全文梗概按钮
+    dom.overviewExportBar.innerHTML = `
+      <button class="btn btn-small btn-export" data-action="zip" data-format="txt">📦 导出 .txt</button>
+      <button class="btn btn-small btn-export" data-action="zip" data-format="md">📦 导出 .md</button>
+      <button class="btn btn-small btn-ai btn-export" data-action="summary">📖 全文梗概</button>
+    `;
+    dom.overviewExportBar.onclick = (e) => {
+      const btn = e.target.closest('.btn-export');
+      if (!btn) return;
+      const cur = state.currentNovelName;
+      if (!cur) return;
+      if (btn.dataset.action === 'zip') API.exportNovelZip(cur, btn.dataset.format || 'txt');
+      else if (btn.dataset.action === 'summary') {
+        dom.overviewNSContent.textContent = '生成中…';
+        dom.overviewNSContent.classList.remove('expanded');
+        dom.overviewNSToggle.textContent = '展开全部 ▼';
+        dom.overviewNovelSummary.style.display = 'block';
+        API.getNovelSummary(cur).then(r => {
+          dom.overviewNSContent.textContent = r.summary || '暂无足够概要生成全文梗概';
+        }).catch(e => {
+          dom.overviewNSContent.textContent = '生成失败：' + e.message;
+        });
+      }
+    };
+
     dom.overviewChapters.innerHTML = data.chapters.map((ch, i) =>
       `<div class="overview-chapter-block" data-id="${ch.id}">
         <div class="ch-block-header">
           <span class="ch-block-order">第 ${i + 1} 章</span>
           <span class="ch-block-title">${escapeHtml(ch.title) || '（未命名）'}</span>
           <span class="ch-block-wc">${formatNum(ch.word_count)} 字</span>
+          <button class="ch-download-btn" data-format="txt" title="下载 TXT">⬇️</button>
+          <button class="ch-download-btn" data-format="md" title="下载 MD">📝</button>
         </div>
         <div class="ch-block-summary">${escapeHtml(extractSummary(ch.summary)) || ''}</div>
       </div>`
@@ -935,6 +1261,7 @@
     dom.settingsForm.querySelector('[name="model"]').value = s.model || '';
     dom.settingsForm.querySelector('[name="max_tokens"]').value = s.max_tokens || 4096;
     dom.settingsForm.querySelector('[name="target_length"]').value = s.target_length || 0;
+    dom.settingsForm.querySelector('[name="writing_instruction"]').value = s.writing_instruction || '';
     dom.tempSlider.value = s.temperature ?? 0.7;
     dom.tempValue.textContent = (s.temperature ?? 0.7).toFixed(2);
     toggleApiKeyField(s.provider || 'claude');
@@ -959,8 +1286,19 @@
      ================================================================ */
   function setupKeyboard() {
     document.addEventListener('keydown', (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); saveCurrentChapter(); }
-      if (e.key === 'Escape' && state.chatOpen) { closeChat(); focusEditor(); }
+      const ctrl = e.ctrlKey || e.metaKey;
+      if (ctrl && e.key === 's') { e.preventDefault(); saveCurrentChapter(); }
+      if (ctrl && e.shiftKey && e.key === 'F') { e.preventDefault(); toggleFocus(); }
+      if (ctrl && e.shiftKey && e.key === 'D') { e.preventDefault(); toggleTheme(); }
+      if (ctrl && e.key === 'f' && !state.isPreview) {
+        e.preventDefault();
+        switchActivity('search');
+        setTimeout(() => { dom.searchInput?.focus(); dom.searchInput?.select(); }, 50);
+      }
+      if (e.key === 'Escape') {
+        if (_focusMode) { toggleFocus(); return; }
+        if (state.chatOpen) { closeChat(); focusEditor(); }
+      }
     });
 
     // 关闭页面时提醒未保存
@@ -1004,11 +1342,134 @@
         const view = btn.dataset.view; // 'list' or 'grid'
         dom.overviewChapters.classList.toggle('list-view', view === 'list');
         dom.overviewChapters.classList.toggle('grid-view', view === 'grid');
+        _saveNovelSettings({ overview_view: view });
       });
     }
 
-    // 小说目录概览 — 点击章节块进入编辑
+    // ── 搜索 ──
+    let _searchTimer = null;
+    let _searchScope = 'all';
+    let _lastSearchQuery = '';  // 记住最后搜索的词
+
+    function updateSearchContext() {
+      const ctx = dom.searchContext;
+      if (!state.currentNovelName) {
+        ctx.textContent = '请先选择一部小说';
+        return;
+      }
+      if (_searchScope === 'chapter' && state.currentChapterId) {
+        const ch = state.chapters.find(c => c.id === state.currentChapterId);
+        ctx.textContent = `《${state.currentNovelName}》 → 第${ch ? ch.order + 1 : '?'}章`;
+      } else {
+        ctx.textContent = `《${state.currentNovelName}》 — 全部章节`;
+      }
+    }
+
+    /** 执行搜索（复用当前搜索词和范围） */
+    async function _doSearch() {
+      const q = dom.searchInput.value.trim();
+      if (!q || !state.currentNovelName) {
+        dom.searchResults.classList.remove('has-results');
+        dom.searchResults.innerHTML = '';
+        return;
+      }
+      _lastSearchQuery = q;
+      try {
+        const params = `q=${encodeURIComponent(q)}&scope=${_searchScope}`;
+        const cid = (_searchScope === 'chapter') ? state.currentChapterId : '';
+        const url = `/api/novels/${encodeURIComponent(state.currentNovelName)}/search?${params}${cid ? `&chapter_id=${cid}` : ''}`;
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data.results.length === 0) {
+          dom.searchResults.innerHTML = '<div class="search-result-empty">未找到匹配内容</div>';
+          dom.searchResults.classList.add('has-results');
+          return;
+        }
+        dom.searchResults.innerHTML = data.results.map(r =>
+          `<div class="search-result-item" data-chapter="${r.chapter_id}">
+            <div class="sr-chapter">第${r.chapter_order+1}章 ${r.chapter_title}（${r.match_count}处）</div>
+            <div class="sr-snippet">${highlightText(r.snippet, q)}</div>
+          </div>`
+        ).join('');
+        dom.searchResults.classList.add('has-results');
+      } catch { /* ignore */ }
+    }
+
+    // 输入时触发搜索
+    dom.searchInput.addEventListener('input', () => {
+      clearTimeout(_searchTimer);
+      const q = dom.searchInput.value.trim();
+      if (!q || !state.currentNovelName) {
+        dom.searchResults.classList.remove('has-results');
+        dom.searchResults.innerHTML = '';
+        return;
+      }
+      _searchTimer = setTimeout(_doSearch, 300);
+    });
+
+    // 点击结果 → 跳转章节，保留搜索面板
+    dom.searchResults.addEventListener('click', (e) => {
+      const item = e.target.closest('.search-result-item');
+      if (item) {
+        const q = dom.searchInput.value.trim();
+        selectChapter(item.dataset.chapter, q);
+      }
+    });
+
+    // 点击搜索面板外部关闭
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.sidebar-panel[data-panel="search"]') &&
+          !e.target.closest('.activity-bar')) {
+        dom.searchResults.classList.remove('has-results');
+      }
+    });
+
+    // 检索范围切换 → 保留搜索词，立即重新搜索
+    document.querySelector('.search-scope')?.addEventListener('click', async (e) => {
+      const btn = e.target.closest('.scope-btn');
+      if (!btn) return;
+      document.querySelectorAll('.scope-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      _searchScope = btn.dataset.scope;
+      dom.searchInput.placeholder = _searchScope === 'all' ? '搜索所有章节…' : '搜索当前章节…';
+      updateSearchContext();
+      dom.searchInput.focus();
+      // 如果已有搜索词，自动重新搜索
+      if (dom.searchInput.value.trim()) {
+        await _doSearch();
+      }
+    });
+
+    // 小说/章节变化时更新搜索上下文和结果
+    const _origSelectNovel = selectNovel;
+    selectNovel = function(name) {
+      _origSelectNovel(name);
+      setTimeout(() => {
+        updateSearchContext();
+        if (dom.searchInput.value.trim()) _doSearch();
+      }, 200);
+    };
+    const _origSelectChapter = selectChapter;
+    selectChapter = function(id, searchQuery) {
+      _origSelectChapter(id, searchQuery);
+      setTimeout(() => {
+        updateSearchContext();
+        // 本章检索模式下，切换章节后重新搜索
+        if (_searchScope === 'chapter' && dom.searchInput.value.trim()) _doSearch();
+      }, 400);
+    };
+
+    // 小说目录概览 — 点击章节块进入编辑 / 下载按钮
     dom.overviewChapters.addEventListener('click', (e) => {
+      const dl = e.target.closest('.ch-download-btn');
+      if (dl) {
+        e.stopPropagation();
+        const block = dl.closest('.overview-chapter-block');
+        if (block && state.currentNovelName) {
+          API.downloadChapter(state.currentNovelName, block.dataset.id, dl.dataset.format || 'txt');
+        }
+        return;
+      }
       const block = e.target.closest('.overview-chapter-block');
       if (block) selectChapter(block.dataset.id);
     });
@@ -1033,7 +1494,24 @@
       await createNovel(data);
     });
 
-    dom.btnNewChapter.addEventListener('click', createChapter);
+    // 新建章节弹窗
+    dom.btnCancelNewChapter.addEventListener('click', closeNewChapterModal);
+    dom.newChapterOverlay.addEventListener('click', (e) => {
+      if (e.target === dom.newChapterOverlay) closeNewChapterModal();
+    });
+    dom.newChapterForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const title = dom.newChapterTitle.value.trim();
+      if (title) await createChapter(title);
+    });
+    dom.newChapterTitle.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        dom.newChapterForm.requestSubmit();
+      }
+    });
+
+    dom.btnNewChapter.addEventListener('click', openNewChapterModal);
     dom.btnSave.addEventListener('click', saveCurrentChapter);
     dom.btnPreview.addEventListener('click', togglePreview);
 
@@ -1051,11 +1529,47 @@
     dom.chapterTitle.addEventListener('input', () => { state.modified = true; dom.chapterStatus.textContent = '未保存'; });
 
     dom.novelList.addEventListener('contextmenu', (e) => {
-      const item = e.target.closest('.novel-item');
-      if (!item) return;
+      if (!state.currentNovelName) return;
       e.preventDefault();
-      if (confirm(`删除「${item.dataset.name}」？`)) deleteNovel(item.dataset.name);
+      if (confirm(`删除「${state.currentNovelName}」？`)) deleteNovel(state.currentNovelName);
     });
+
+    // 主题切换
+    dom.btnTheme.addEventListener('click', toggleTheme);
+    // 专注模式
+    dom.btnFocus.addEventListener('click', toggleFocus);
+    // 导出弹窗
+    dom.btnExportDialog.addEventListener('click', openExportDialog);
+    dom.btnCancelExport.addEventListener('click', closeExportDialog);
+    dom.btnConfirmExport.addEventListener('click', confirmExport);
+    dom.exportDialogOverlay.addEventListener('click', (e) => {
+      if (e.target === dom.exportDialogOverlay) closeExportDialog();
+    });
+    dom.exportDialogList.addEventListener('change', updateExportCount);
+    dom.btnExportSelectAll.addEventListener('click', () => {
+      dom.exportDialogList.querySelectorAll('.edi-cb').forEach(cb => cb.checked = true);
+      updateExportCount();
+    });
+    dom.btnExportDeselectAll.addEventListener('click', () => {
+      dom.exportDialogList.querySelectorAll('.edi-cb').forEach(cb => cb.checked = false);
+      updateExportCount();
+    });
+    // 导出格式选择高亮
+    document.querySelector('.export-format-select')?.addEventListener('click', (e) => {
+      const label = e.target.closest('.export-format-option');
+      if (!label) return;
+      document.querySelectorAll('.export-format-option').forEach(el => el.classList.remove('active'));
+      label.classList.add('active');
+    });
+    // 全文梗概展开/收起
+    dom.overviewNSToggle.addEventListener('click', () => {
+      const expanded = dom.overviewNSContent.classList.toggle('expanded');
+      dom.overviewNSToggle.textContent = expanded ? '收起 ▲' : '展开全部 ▼';
+    });
+
+    // 逆序排列（各自独立）
+    dom.btnReverseOrder.addEventListener('click', reverseOverview);
+    dom.btnReverseSidebar.addEventListener('click', reverseSidebar);
 
     // AI 设置
     dom.btnSettings.addEventListener('click', () => { try { openSettings(); } catch (e) { console.error(e); setStatus('设置出错'); } });
@@ -1195,6 +1709,7 @@
       console.log('[app.js] init() start');
       cacheDom();
       console.log('[app.js] cacheDom done');
+      initTheme();
       setupKeyboard();
       console.log('[app.js] setupKeyboard done');
       bindEvents();

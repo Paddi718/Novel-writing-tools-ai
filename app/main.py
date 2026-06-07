@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 
-from app.routers import novels, chapters, ai, settings
+from app.routers import novels, chapters, ai, settings, export
 
 # ---------------------------------------------------------------------------
 # 应用实例
@@ -18,6 +18,7 @@ app.include_router(novels.router)
 app.include_router(chapters.router)
 app.include_router(ai.router)
 app.include_router(settings.router)
+app.include_router(export.router)
 
 
 # ---------------------------------------------------------------------------

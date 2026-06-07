@@ -24,7 +24,9 @@ const API = (() => {
     createNovel:    (data)       => request('POST', '/api/novels', data),
     getNovel:       (name)       => request('GET',  `/api/novels/${encodeURIComponent(name)}`),
     getNovelOverview:(name)      => request('GET',  `/api/novels/${encodeURIComponent(name)}/overview`),
+    getNovelSummary: (name)      => request('GET',  `/api/novels/${encodeURIComponent(name)}/novel-summary`),
     updateNovel:    (name, data) => request('PUT',  `/api/novels/${encodeURIComponent(name)}`, data),
+    updateNovelSettings: (name, data) => request('PUT', `/api/novels/${encodeURIComponent(name)}/settings`, data),
     deleteNovel:    (name)       => request('DELETE', `/api/novels/${encodeURIComponent(name)}`),
 
     // ── 章节 ──
@@ -34,6 +36,7 @@ const API = (() => {
     updateChapter:  (name, chId, data) => request('PUT', `/api/novels/${encodeURIComponent(name)}/chapters/${chId}`, data),
     deleteChapter:  (name, chId)  => request('DELETE',`/api/novels/${encodeURIComponent(name)}/chapters/${chId}`),
     reorderChapters:(name, order) => request('PUT',   `/api/novels/${encodeURIComponent(name)}/chapters/reorder`, { order }),
+    searchNovel:      (name, q)   => request('GET',   `/api/novels/${encodeURIComponent(name)}/search?q=${encodeURIComponent(q)}`),
 
     // ── AI 聊天 ──
     /**
@@ -67,6 +70,20 @@ const API = (() => {
     // ── 章节概要 ──
     getChapterSummary: (name, chId) => request('GET', `/api/novels/${encodeURIComponent(name)}/chapters/${chId}/summary`),
     refreshSummary:    (name, chId) => request('POST', `/api/novels/${encodeURIComponent(name)}/chapters/${chId}/summary`),
+
+    // ── 导出 ──
+    exportNovelZip: (name, format = 'txt') => window.open(`/api/novels/${encodeURIComponent(name)}/export/zip?format=${format}`, '_blank'),
+    // 选择导出用独立方法（返回 Blob 而非 JSON）
+    exportSelectedZip: async (name, ids, format = 'txt') => {
+      const res = await fetch(`/api/novels/${encodeURIComponent(name)}/export/zip-selected`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chapter_ids: ids, format }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({ detail: '导出失败' }))).detail);
+      return res.blob();
+    },
+    downloadChapter: (name, chId, format = 'txt') => window.open(`/api/novels/${encodeURIComponent(name)}/chapters/${chId}/download?format=${format}`, '_blank'),
 
     // ── 章节拆分 ──
     splitChapter: (name, chId, data) => request('POST', `/api/novels/${encodeURIComponent(name)}/chapters/${chId}/split`, data),
