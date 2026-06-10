@@ -6,9 +6,19 @@ from pathlib import Path
 # 全局路径常量
 APP_DIR = Path(__file__).parent.parent
 DATA_DIR = APP_DIR / "data"
-SETTINGS_PATH = APP_DIR / "settings.json"
+SETTINGS_PATH = DATA_DIR / "settings.json"       # 持久化路径（挂载的卷内）
+_FALLBACK_SETTINGS_PATH = APP_DIR / "settings.json"  # 备胎路径（镜像内置默认值）
 
 DATA_DIR.mkdir(exist_ok=True)
+
+_DEFAULT_SETTINGS = {
+    "provider": "claude",
+    "api_key": "",
+    "api_base": "",
+    "model": "",
+    "max_tokens": 4096,
+    "temperature": 0.7,
+}
 
 
 def _load_json(path: Path, default=None):
@@ -26,19 +36,17 @@ def _save_json(path: Path, data):
 # ---------------------------------------------------------------------------
 
 def load_settings() -> dict:
-    """从 settings.json 读取 AI 配置"""
-    return _load_json(SETTINGS_PATH, default={
-        "provider": "claude",
-        "api_key": "",
-        "api_base": "",
-        "model": "",
-        "max_tokens": 4096,
-        "temperature": 0.7,
-    })
+    """读取 AI 配置，优先使用持久化路径，其次容器内置默认"""
+    if SETTINGS_PATH.exists():
+        return _load_json(SETTINGS_PATH, default=_DEFAULT_SETTINGS)
+    # 首次启动：从镜像内置 settings 读取，写入持久化路径
+    builtin = _load_json(_FALLBACK_SETTINGS_PATH, default=_DEFAULT_SETTINGS)
+    _save_json(SETTINGS_PATH, builtin)
+    return builtin
 
 
 def save_settings(data: dict) -> dict:
-    """合并保存 AI 配置到 settings.json"""
+    """合并保存 AI 配置到持久化路径"""
     saved = load_settings()
     saved.update(data)
     _save_json(SETTINGS_PATH, saved)

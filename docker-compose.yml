@@ -1,14 +1,25 @@
 services:
   novel-writing-tool:
-    build: .
+    build:
+      context: .
+      # 如需使用 Claude CLI 本地模式，改为 true（需宿主机已安装 claude）
+      args:
+        INSTALL_CLAUDE_CLI: "true"
     container_name: novel-writing-tool
     ports:
       - "8001:8001"
     volumes:
-      # Persist novel data outside the container
+      # 必需：小说数据持久化（自动创建）
       - ./data:/app/data
-      # Mount your settings with API key (create settings.local.json and rename)
-      - ./settings.json:/app/settings.json:ro
+
+      # === 可选挂载（按需取消注释） ===
+      #
+      # AI 设置持久化（不挂载则使用 data/settings.json，UI 可保存）
+      # - ./settings.json:/app/settings.json
+      #
+      # Claude CLI 凭证（INSTALL_CLAUDE_CLI=true 时需挂载）
+      - ~/.claude:/app/.claude:ro
+
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-sS", "http://127.0.0.1:8001/api/novels"]
